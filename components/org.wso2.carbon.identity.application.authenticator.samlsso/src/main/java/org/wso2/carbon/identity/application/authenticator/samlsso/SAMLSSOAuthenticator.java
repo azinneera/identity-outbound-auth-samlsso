@@ -47,6 +47,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -73,7 +74,7 @@ public class SAMLSSOAuthenticator extends AbstractApplicationAuthenticator imple
 
     @Override
     protected void initiateAuthenticationRequest(HttpServletRequest request, HttpServletResponse response,
-                                                 AuthenticationContext context)
+            AuthenticationContext context)
             throws AuthenticationFailedException {
 
         Map<String, String> authenticatorProperties = context.getAuthenticatorProperties();
@@ -99,6 +100,9 @@ public class SAMLSSOAuthenticator extends AbstractApplicationAuthenticator imple
                 isPost = false;
             }
 
+            //resolves dynamic query parameters from "Additional Query Parameters"
+            resolveDynamicParameter(context);
+
             if (isPost) {
                 sendPostRequest(request, response, false, false, idpURL, context);
                 return;
@@ -113,13 +117,60 @@ public class SAMLSSOAuthenticator extends AbstractApplicationAuthenticator imple
             }
         } catch (SAMLSSOException e) {
             throw new AuthenticationFailedException(e.getMessage(), e);
+        } catch (UnsupportedEncodingException e) {
+            throw new AuthenticationFailedException(e.getMessage(), e);
         }
 
         return;
     }
 
+    /**
+     * Resolves dynamic query parameters from "Additional Query Parameters" string.
+     *
+     * @param context authentication context
+     * @throws UnsupportedEncodingException if the character encoding is unsupported
+     */
+    private void resolveDynamicParameter(AuthenticationContext context) throws UnsupportedEncodingException {
+        String queryParameters = context.getAuthenticatorProperties().get(FrameworkConstants.QUERY_PARAMS);
+        if (queryParameters != null) {
+            context.getAuthenticatorProperties()
+                    .put(FrameworkConstants.QUERY_PARAMS, getResolvedQueryParams(context, queryParameters));
+        }
+    }
+
+    /**
+     * Checks for any dynamic query parameters and replaces it with the values in the SAML request.
+     *
+     * @param context authentication context
+     * @param queryParamString query parameters string
+     * @return resolved query parameter string
+     * @throws UnsupportedEncodingException if the character encoding is unsupported
+     */
+    private String getResolvedQueryParams(AuthenticationContext context, String queryParamString)
+            throws UnsupportedEncodingException {
+        Map<String, String> queryMap = SSOUtils.getQueryMap(queryParamString);
+        StringBuilder queryBuilder = new StringBuilder();
+        for (Map.Entry<String, String> entry : queryMap.entrySet()) {
+            if (entry.getValue().charAt(0) == '{' &&
+                    entry.getValue().charAt(entry.getValue().length()-1) == '}') {
+                String[] dynamicParam = context.getAuthenticationRequest().getRequestQueryParam(entry.getKey());
+                if (dynamicParam != null) {
+                    entry.setValue(dynamicParam[0]);
+                }
+            }
+            if (queryBuilder.length() > 0) {
+                queryBuilder.append('&');
+            }
+            queryBuilder.append(URLEncoder.encode(entry.getKey(), "UTF-8"))
+                    .append("=").append((URLEncoder.encode(entry.getValue(), "UTF-8")));
+        }
+        return queryBuilder.toString();
+    }
+
+
+
     private void generateAuthenticationRequest(HttpServletRequest request, HttpServletResponse response,
-                                               String ssoUrl, Map<String, String> authenticatorProperties)
+            String ssoUrl, Map<String, String> authenticatorProperties)
             throws AuthenticationFailedException {
         try {
             String domain = request.getParameter("domain");
@@ -148,7 +199,7 @@ public class SAMLSSOAuthenticator extends AbstractApplicationAuthenticator imple
 
     @Override
     protected void processAuthenticationResponse(HttpServletRequest request, HttpServletResponse response,
-                                                 AuthenticationContext context)
+            AuthenticationContext context)
             throws AuthenticationFailedException {
 
         String subject = null;
@@ -243,7 +294,7 @@ public class SAMLSSOAuthenticator extends AbstractApplicationAuthenticator imple
 
     @Override
     protected void initiateLogoutRequest(HttpServletRequest request,
-                                         HttpServletResponse response, AuthenticationContext context)
+            HttpServletResponse response, AuthenticationContext context)
             throws LogoutFailedException {
 
         boolean logoutEnabled = false;
@@ -325,14 +376,14 @@ public class SAMLSSOAuthenticator extends AbstractApplicationAuthenticator imple
 
     @Override
     protected void processLogoutResponse(HttpServletRequest request,
-                                         HttpServletResponse response, AuthenticationContext context)
+            HttpServletResponse response, AuthenticationContext context)
             throws LogoutFailedException {
         throw new UnsupportedOperationException();
     }
 
     private void sendPostRequest(HttpServletRequest request, HttpServletResponse response,
-                                 boolean isLogout, boolean isPassive,
-                                 String loginPage, AuthenticationContext context) throws SAMLSSOException {
+            boolean isLogout, boolean isPassive,
+            String loginPage, AuthenticationContext context) throws SAMLSSOException {
 
         SAML2SSOManager saml2SSOManager = getSAML2SSOManagerInstance();
         saml2SSOManager.init(context.getTenantDomain(), context.getAuthenticatorProperties(),
@@ -372,7 +423,7 @@ public class SAMLSSOAuthenticator extends AbstractApplicationAuthenticator imple
     }
 
     private String buildPostPageInputs(String encodedRequest, String relayState,
-                                       Map<String, String> reqParamMap) {
+            Map<String, String> reqParamMap) {
         StringBuilder hiddenInputBuilder = new StringBuilder("");
         hiddenInputBuilder.append("<input type='hidden' name='SAMLRequest' value='")
                 .append(encodedRequest).append("'>");
@@ -393,7 +444,7 @@ public class SAMLSSOAuthenticator extends AbstractApplicationAuthenticator imple
     }
 
     private Map<String, String> getAdditionalRequestParams(HttpServletRequest request,
-                                                           AuthenticationContext context) {
+            AuthenticationContext context) {
         Map<String, String> reqParamMap = new HashMap<String, String>();
         Map<String, String> authenticatorProperties = context.getAuthenticatorProperties();
 
